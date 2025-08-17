@@ -1,0 +1,9 @@
+{
+    "id": "mission_01",
+    "title": "The First Byte",
+    "description": "Welcome, agent. Your first mission is to gain access to the 'Alpha' server. We believe the password is 'hunter2'.",
+    "solution": "hunter2",
+    "reward": "You have earned your first 50% completion.",
+    "reward_progress": 50,
+    "requirements": []
+}
