@@ -38,8 +38,22 @@ file_system = {
 }
 
 # --- User Data Persistence ---
+import re
+
+def is_valid_username(username):
+    # Only allow alphanumeric, underscore, and hyphen
+    return bool(re.match(r'^[A-Za-z0-9_-]+$', username))
+
 def get_user_data_path(username):
-    return os.path.join("cloud_saves", f"{username}.json")
+    if not is_valid_username(username):
+        raise ValueError("Invalid username")
+    path = os.path.normpath(os.path.join("cloud_saves", f"{username}.json"))
+    # Ensure the path is within the cloud_saves directory
+    base_dir = os.path.abspath("cloud_saves")
+    abs_path = os.path.abspath(path)
+    if not abs_path.startswith(base_dir):
+        raise ValueError("Invalid path")
+    return path
 
 def save_user_data(username, data):
     if not os.path.exists("cloud_saves"):
@@ -316,7 +330,10 @@ def get_user_state():
     username = data.get("username")
     if username:
         ACTIVE_USERS[username] = time.time()  # New: Update last activity
-    player_path = get_user_data_path(username)
+    try:
+        player_path = get_user_data_path(username)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid username."})
     if not os.path.exists(player_path):
         return jsonify({"status": "error", "message": "User data not found."})
     with open(player_path, "r") as f:
