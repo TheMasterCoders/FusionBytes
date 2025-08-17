@@ -1,6 +1,7 @@
 import os
 import json
 from flask import Flask, jsonify, request, render_template, send_from_directory
+from werkzeug.utils import secure_filename
 import time
 import threading
 import logging
@@ -39,7 +40,15 @@ file_system = {
 
 # --- User Data Persistence ---
 def get_user_data_path(username):
-    return os.path.join("cloud_saves", f"{username}.json")
+    # Sanitize the username to prevent path traversal
+    safe_username = secure_filename(username)
+    base_dir = os.path.abspath("cloud_saves")
+    path = os.path.join(base_dir, f"{safe_username}.json")
+    norm_path = os.path.normpath(path)
+    # Ensure the normalized path is within the intended directory
+    if not norm_path.startswith(base_dir):
+        raise Exception("Invalid username/path traversal detected")
+    return norm_path
 
 def save_user_data(username, data):
     if not os.path.exists("cloud_saves"):
