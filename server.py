@@ -39,7 +39,12 @@ file_system = {
 
 # --- User Data Persistence ---
 def get_user_data_path(username):
-    return os.path.join("cloud_saves", f"{username}.json")
+    # Prevent path traversal: normalize and check prefix
+    base_dir = os.path.abspath("cloud_saves")
+    requested_path = os.path.normpath(os.path.join(base_dir, f"{username}.json"))
+    if not requested_path.startswith(base_dir + os.sep):
+        raise ValueError("Invalid username/path traversal detected")
+    return requested_path
 
 def save_user_data(username, data):
     if not os.path.exists("cloud_saves"):
