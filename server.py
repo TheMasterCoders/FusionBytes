@@ -1,11 +1,13 @@
 import os
 import json
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template, send_from_directory
 import time
 import threading
 import logging
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 with open("server.json", "r") as f:
     config = json.load(f)
@@ -15,6 +17,7 @@ CHAT_LOG = []
 MUTED_USERS = {}
 BANNED_USERS = {}
 KICKED_USERS = []
+ACTIVE_USERS = {}  # New: In-memory dictionary to track active users
 
 # A dictionary to hold mission data, loaded from files
 MISSIONS = {}
@@ -115,7 +118,7 @@ def handle_server_command(command, args, username):
     if command == "hack":
         if len(args) < 2:
             return {"status": "error", "message": "Usage: hack <mission_id> <password>"}
-
+        
         mission_id = args[0]
         password = args[1]
         
@@ -133,6 +136,7 @@ def handle_server_command(command, args, username):
             return {"status": "success", "message": f"SUCCESS! Mission '{mission['title']}' completed. {mission['reward']}"}
         else:
             return {"status": "error", "message": "Incorrect password. Access denied."}
+            
     if command == "ls":
         current_dir = get_current_directory_object(player_location)
         if not current_dir or not isinstance(current_dir, dict):
@@ -164,7 +168,8 @@ def handle_server_command(command, args, username):
         player_data["location"] = new_location
         save_user_data(username, player_data)
         
-        return {"status": "success", "message": "Directory changed."}
+        location_str = "~" if new_location == ["root", "home", "user"] else "/".join(new_location)
+        return {"status": "success", "message": f"Directory changed. Current location: {location_str}"}
 
     if command == "cat":
         if not args:
@@ -179,7 +184,6 @@ def handle_server_command(command, args, username):
         else:
             return {"status": "error", "message": f"cat: {file_name}: No such file or directory"}
     
-    # New: Logic for the missions command
     if command == "missions":
         output = "--- Missions ---\n"
         if not MISSIONS:
@@ -204,6 +208,8 @@ def check_command():
     command = data.get("command")
     args = data.get("args", [])
     username = data.get("username")
+    if username:
+        ACTIVE_USERS[username] = time.time()  # Update last activity
     if command in SERVER_COMMANDS:
         response = handle_server_command(command, args, username)
         return jsonify(response)
@@ -242,6 +248,7 @@ def log_reconnection():
     username = data.get("username")
     if username:
         print(f"Server: User {username} reconnected.")
+        ACTIVE_USERS[username] = time.time()  # New: Update last activity on reconnect
         return jsonify({"status": "success", "message": "Reconnection logged."})
     return jsonify({"status": "error", "message": "Username not provided."}), 400
 
@@ -266,6 +273,10 @@ def log_disconnect():
     username = data.get("username")
     if not username:
         return jsonify({"status": "error", "message": "Username not provided."}), 400
+    
+    # New: Remove user from active list on explicit disconnect
+    if username in ACTIVE_USERS:
+        del ACTIVE_USERS[username]
 
     print(f"Server: Client {username} disconnected. Reason: disconnect command used")
     return jsonify({"status": "success", "message": "Disconnect logged."})
@@ -276,6 +287,10 @@ def get_chat_messages():
 
 @app.route("/get_new_chat_messages", methods=["GET"])
 def get_new_chat_messages():
+    username = request.args.get("username")
+    if username:
+        ACTIVE_USERS[username] = time.time()  # New: Update last activity
+    
     last_timestamp = float(request.args.get("last_timestamp", 0))
     new_messages = [msg for msg in CHAT_LOG if msg["timestamp"] > last_timestamp]
     return jsonify({"messages": new_messages})
@@ -284,6 +299,8 @@ def get_new_chat_messages():
 def check_kick():
     data = request.get_json()
     username = data.get("username")
+    if username:
+        ACTIVE_USERS[username] = time.time()  # New: Update last activity
     if username in KICKED_USERS:
         KICKED_USERS.remove(username)
         return jsonify({"should_kick": True})
@@ -297,6 +314,8 @@ def get_commands():
 def get_user_state():
     data = request.get_json()
     username = data.get("username")
+    if username:
+        ACTIVE_USERS[username] = time.time()  # New: Update last activity
     player_path = get_user_data_path(username)
     if not os.path.exists(player_path):
         return jsonify({"status": "error", "message": "User data not found."})
@@ -306,6 +325,81 @@ def get_user_state():
     location = player_data.get("location", ["root", "home", "user"])
     location_str = "~" if location == ["root", "home", "user"] else "/".join(location)
     return jsonify({"status": "success", "location": location_str})
+
+# New: Admin web routes
+@app.route("/admin")
+def admin_panel():
+    return render_template("admin.html")
+
+@app.route("/admin/chat_log")
+def get_admin_chat_log():
+    return jsonify(CHAT_LOG)
+
+@app.route("/admin/users")
+def get_admin_users():
+    users = [f.replace(".json", "") for f in os.listdir("cloud_saves") if f.endswith(".json")]
+    active_users_list = list(ACTIVE_USERS.keys())  # New: Get a list of active users
+    return jsonify({
+        "active_users": active_users_list,
+        "all_users": users,
+        "muted": list(MUTED_USERS.keys()),
+        "banned": list(BANNED_USERS.keys())
+    })
+
+@app.route("/admin/mute_user", methods=["POST"])
+def mute_user():
+    data = request.get_json()
+    username = data.get("username")
+    if username:
+        MUTED_USERS[username] = True
+        return jsonify({"status": "success", "message": f"{username} muted."})
+    return jsonify({"status": "error", "message": "Username not provided."})
+
+@app.route("/admin/unmute_user", methods=["POST"])
+def unmute_user():
+    data = request.get_json()
+    username = data.get("username")
+    if username in MUTED_USERS:
+        del MUTED_USERS[username]
+        return jsonify({"status": "success", "message": f"{username} unmuted."})
+    return jsonify({"status": "error", "message": "Username not found."})
+
+# New: Admin web routes for ban and kick
+@app.route("/admin/ban_user", methods=["POST"])
+def ban_user():
+    data = request.get_json()
+    username = data.get("username")
+    if username:
+        BANNED_USERS[username] = True
+        return jsonify({"status": "success", "message": f"{username} banned."})
+    return jsonify({"status": "error", "message": "Username not provided."})
+
+@app.route("/admin/unban_user", methods=["POST"])
+def unban_user():
+    data = request.get_json()
+    username = data.get("username")
+    if username in BANNED_USERS:
+        del BANNED_USERS[username]
+        return jsonify({"status": "success", "message": f"{username} unbanned."})
+    return jsonify({"status": "error", "message": "Username not found."})
+
+@app.route("/admin/kick_user", methods=["POST"])
+def kick_user():
+    data = request.get_json()
+    username = data.get("username")
+    if username:
+        KICKED_USERS.append(username)
+        return jsonify({"status": "success", "message": f"{username} marked for kick."})
+    return jsonify({"status": "error", "message": "Username not provided."})
+def get_admin_users():
+    users = [f.replace(".json", "") for f in os.listdir("cloud_saves") if f.endswith(".json")]
+    active_users_list = list(ACTIVE_USERS.keys())
+    return jsonify({
+        "active_users": active_users_list,
+        "all_users": users,
+        "muted": list(MUTED_USERS.keys()),
+        "banned": list(BANNED_USERS.keys())
+    })
 
 # --- Server-Side Admin Commands ---
 def handle_server_input():
@@ -362,6 +456,24 @@ def handle_server_input():
         else:
             print("SERVER: Unknown command. Type 'help' for a list of commands.")
 
+# New: Function to clean up inactive users
+def cleanup_inactive_users():
+    while True:
+        # Check every 60 seconds
+        time.sleep(60) 
+        
+        # Remove users who haven't pinged in the last 120 seconds
+        inactive_threshold = time.time() - 120
+        
+        users_to_remove = []
+        for username, last_ping in ACTIVE_USERS.items():
+            if last_ping < inactive_threshold:
+                users_to_remove.append(username)
+        
+        for username in users_to_remove:
+            del ACTIVE_USERS[username]
+            print(f"Server: {username} has been marked as inactive.")
+
 if __name__ == "__main__":
     print("Server: Starting up...")
     if not os.path.exists("cloud_saves"):
@@ -375,8 +487,12 @@ if __name__ == "__main__":
     log.setLevel(logging.ERROR)
 
     # Start the admin input thread
-    admin_thread = threading.Thread(target=handle_server_input)
-    admin_thread.daemon = True
+    admin_thread = threading.Thread(target=handle_server_input, daemon=True)
     admin_thread.start()
-    
-    app.run(host=config["host"], port=config["port"], debug=True)
+
+    # New: Start the user cleanup thread
+    cleanup_thread = threading.Thread(target=cleanup_inactive_users, daemon=True)
+    cleanup_thread.start()
+
+# Note: The code for running with waitress is outside the 'if __name__ == "__main__":' block.
+# This ensures it can be imported by the waitress-serve command.

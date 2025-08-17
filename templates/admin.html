@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FusionBytes Admin Panel</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .panel {
+            flex: 1;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #fff;
+        }
+        h2 {
+            border-bottom: 2px solid #333;
+            padding-bottom: 5px;
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            padding: 5px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .button {
+            padding: 5px 10px;
+            cursor: pointer;
+            border: none;
+            border-radius: 3px;
+            color: white;
+            margin-left: 5px;
+        }
+        .mute-btn { background-color: #f44336; }
+        .unmute-btn { background-color: #4CAF50; }
+        .ban-btn { background-color: #d32f2f; }
+        .unban-btn { background-color: #2196F3; }
+        .kick-btn { background-color: #ff9800; }
+        #chat-log {
+            height: 300px;
+            overflow-y: scroll;
+            border: 1px solid #ccc;
+            padding: 10px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>FusionBytes Admin Panel</h1>
+    <div class="container">
+        <div class="panel">
+            <h2>Chat Log</h2>
+            <div id="chat-log"></div>
+        </div>
+        <div class="panel">
+            <h2>Users</h2>
+            <h3>Active Users (<span id="active-count">0</span>)</h3>
+            <ul id="active-user-list"></ul>
+            <h3>All Registered Users</h3>
+            <ul id="user-list"></ul>
+        </div>
+    </div>
+
+    <script>
+        const SERVER_URL = 'http://127.0.0.1:5000';
+
+        async function fetchChatLog() {
+            const chatLogDiv = document.getElementById('chat-log');
+            try {
+                const response = await fetch(`${SERVER_URL}/admin/chat_log`);
+                const messages = await response.json();
+                chatLogDiv.innerHTML = '';
+                messages.forEach(msg => {
+                    const date = new Date(msg.timestamp * 1000).toLocaleTimeString();
+                    chatLogDiv.innerHTML += `[${date}] <strong>${msg.sender}</strong>: ${msg.message}<br>`;
+                });
+                chatLogDiv.scrollTop = chatLogDiv.scrollHeight;
+            } catch (error) {
+                chatLogDiv.textContent = 'Could not load chat log.';
+            }
+        }
+
+        async function fetchUsers() {
+            const userList = document.getElementById('user-list');
+            const activeUserList = document.getElementById('active-user-list');
+            const activeCount = document.getElementById('active-count');
+            try {
+                const response = await fetch(`${SERVER_URL}/admin/users`);
+                const data = await response.json();
+                
+                // Display active users
+                activeUserList.innerHTML = '';
+                activeCount.textContent = data.active_users.length;
+                data.active_users.forEach(username => {
+                    const isMuted = data.muted.includes(username);
+                    const isBanned = data.banned.includes(username);
+                    const li = document.createElement('li');
+                    li.innerHTML = `
+                        <span>${username} ${isMuted ? '(Muted)' : ''} ${isBanned ? '(Banned)' : ''}</span>
+                        <div>
+                            ${isMuted ? 
+                                `<button class="button unmute-btn" onclick="unmuteUser('${username}')">Unmute</button>` :
+                                `<button class="button mute-btn" onclick="muteUser('${username}')">Mute</button>`}
+                            ${isBanned ? 
+                                `<button class="button unban-btn" onclick="unbanUser('${username}')">Unban</button>` :
+                                `<button class="button ban-btn" onclick="banUser('${username}')">Ban</button>`}
+                            <button class="button kick-btn" onclick="kickUser('${username}')">Kick</button>
+                        </div>
+                    `;
+                    activeUserList.appendChild(li);
+                });
+
+                // Display all registered users
+                userList.innerHTML = '';
+                data.all_users.forEach(username => {
+                    const isMuted = data.muted.includes(username);
+                    const isBanned = data.banned.includes(username);
+                    const li = document.createElement('li');
+                    li.innerHTML = `
+                        <span>${username} ${isMuted ? '(Muted)' : ''} ${isBanned ? '(Banned)' : ''}</span>
+                        <div>
+                            ${isMuted ? 
+                                `<button class="button unmute-btn" onclick="unmuteUser('${username}')">Unmute</button>` :
+                                `<button class="button mute-btn" onclick="muteUser('${username}')">Mute</button>`}
+                            ${isBanned ? 
+                                `<button class="button unban-btn" onclick="unbanUser('${username}')">Unban</button>` :
+                                `<button class="button ban-btn" onclick="banUser('${username}')">Ban</button>`}
+                            <button class="button kick-btn" onclick="kickUser('${username}')">Kick</button>
+                        </div>
+                    `;
+                    userList.appendChild(li);
+                });
+
+            } catch (error) {
+                userList.innerHTML = '<li>Could not load users.</li>';
+            }
+        }
+
+        async function muteUser(username) {
+            await fetch(`${SERVER_URL}/admin/mute_user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username })
+            });
+            fetchUsers();
+        }
+
+        async function unmuteUser(username) {
+            await fetch(`${SERVER_URL}/admin/unmute_user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username })
+            });
+            fetchUsers();
+        }
+
+        async function banUser(username) {
+            await fetch(`${SERVER_URL}/admin/ban_user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username })
+            });
+            fetchUsers();
+        }
+
+        async function unbanUser(username) {
+            await fetch(`${SERVER_URL}/admin/unban_user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username })
+            });
+            fetchUsers();
+        }
+
+        async function kickUser(username) {
+            await fetch(`${SERVER_URL}/admin/kick_user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username })
+            });
+            fetchUsers();
+        }
+
+        setInterval(fetchChatLog, 3000);
+        setInterval(fetchUsers, 5000);
+        fetchChatLog();
+        fetchUsers();
+    </script>
+</body>
+</html>
