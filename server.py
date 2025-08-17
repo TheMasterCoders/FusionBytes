@@ -1,6 +1,7 @@
 import os
 import json
 from flask import Flask, jsonify, request, render_template, send_from_directory
+from werkzeug.utils import secure_filename
 import time
 import threading
 import logging
@@ -39,7 +40,16 @@ file_system = {
 
 # --- User Data Persistence ---
 def get_user_data_path(username):
-    return os.path.join("cloud_saves", f"{username}.json")
+    # Sanitize the username to prevent path traversal
+    safe_username = secure_filename(str(username))
+    if not safe_username:
+        raise ValueError("Invalid username.")
+    base_dir = os.path.abspath("cloud_saves")
+    full_path = os.path.abspath(os.path.join(base_dir, f"{safe_username}.json"))
+    # Ensure the resulting path is within the intended directory
+    if not full_path.startswith(base_dir + os.sep):
+        raise ValueError("Invalid username path.")
+    return full_path
 
 def save_user_data(username, data):
     if not os.path.exists("cloud_saves"):
